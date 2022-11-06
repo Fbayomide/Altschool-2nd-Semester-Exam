@@ -1,0 +1,375 @@
+---
+- name: Deploy a Laravel app and its dependencies using ansible.
+  hosts: all
+  become: yes
+  become_method: sudo
+  tasks:
+
+
+  - name: Apt Upgrade and Update
+    apt:
+       update_cache: yes
+       upgrade: yes
+
+# Install Laravel dependencies
+
+  - name: install laravel dependencies (apache2, git, php 8.1, php support for apache, curl, unzip and zip)
+    apt:
+       name: apache2
+       state: latest
+
+  - name: install git
+    apt:
+       name: git
+
+  - name: install wget
+    apt:
+       name: wget
+
+  - name: install zip
+    apt:
+       name: zip
+
+  - name: install unzip
+    apt:
+       name: unzip
+
+  - name: install curl
+    apt:
+       name: curl
+
+  - name: Install PHP support for Apache
+    apt:
+       name: libapache2-mod-php
+
+  - name: install pre-installation files
+    apt:
+       pkg:
+           - software-properties-common
+           - lsb-release
+           - apt-transport-https
+           - ca-certificates
+           - gnupg2
+
+  - name: Add specified repository into sources list
+    apt_repository:
+       repo: 'ppa:ondrej/php'
+       state: present
+
+  - name: apt update
+    apt: update_cache=yes
+
+  - name: Install PHP 8.1
+    apt:
+       name: php8.1
+       update_cache: yes
+       state: latest
+    become: yes
+
+  - name: Install PHP and its extensions/packages
+    apt:
+       pkg:
+          - php8.1-cli
+          - php8.1-pgsql
+          - php8.1-xml
+          - php8.1-xmlrpc
+          - php8.1-curl
+          - php8.1-gd
+          - php8.1-imagick
+          - php8.1-common
+          - php8.1-dev
+          - php8.1-imap
+          - php8.1-mbstring
+          - php8.1-opcache
+          - php8.1-soap
+          - php8.1-zip
+          - php8.1-intl
+          - php8.1-mysql
+          - php-curl
+
+  - name: Apt update and upgrade
+    apt: update_cache=yes upgrade=yes
+
+# Download Composer
+
+  - name: Download Composer Via URL
+    get_url:
+       url: https://getcomposer.org/installer
+       dest: /tmp/installer
+
+  - name: Install composer
+    shell: cat /tmp/installer | php -- --install-dir=/usr/local/bin
+    args:
+       creates: /usr/local/bin/composer
+
+  - name: rename composer.phar to composer to be able to call it globally
+    shell: mv /usr/local/bin/composer.phar /usr/local/bin/composer
+    args:
+       creates: /usr/local/bin/composer
+
+  - name: Give Composer executable permission
+    file:
+       path: /usr/local/bin/composer
+       mode: a+x
+       state: file
+
+# Configure php.ini file
+
+  - name: set max filesize upload
+    become: yes
+    ini_file:
+       path: /etc/php/8.1/apache2/php.ini
+       section: PHP
+       option: upload_max_filesize
+       value: 64M
+
+
+  - name: set post_max_size
+    become: yes
+    ini_file:
+       path: /etc/php/8.1/apache2/php.ini
+       section: PHP
+       option: post_max_size
+       value: 128M
+
+
+  - name: set memory limit
+    become: yes
+    ini_file:
+       path: /etc/php/8.1/apache2/php.ini
+       section: PHP
+       option: memory_limit
+       value: 256M
+
+  - name: set max_execution_time
+    become: yes
+    ini_file:
+       path: /etc/php/8.1/apache2/php.ini
+       section: PHP
+       option: max_execution_time
+       value: 300
+
+  - name: set max_input_vars
+    become: yes
+    ini_file:
+       path: /etc/php/8.1/apache2/php.ini
+       section: PHP
+       option: max_input_vars
+       value: 5000
+
+  - name: set max_input_time
+    become: yes
+    ini_file:
+       path: /etc/php/8.1/apache2/php.ini
+       section: PHP
+       option: max_input_time
+       value: 120
+
+# Install MySQL
+
+  - name: Installing Mysql  and dependencies
+    package:
+       name: "{{item}}"
+       state: present
+       update_cache: yes
+    loop:
+       - mysql-server
+       - mysql-client
+       - python3-mysqldb
+       - libmysqlclient-dev
+    become: yes
+
+  - name: start and enable mysql service
+    service:
+       name: mysql
+       state: started
+       enabled: yes
+
+  - name: Create mysql user
+    mysql_user:
+       name: "fbayomide"
+       password: "fbayomide"
+       priv: '*.*:ALL'
+       host: '%'
+       state: present
+
+  - name: Create database
+    mysql_db:
+       name: "fbayomide"
+       state: present
+
+  - name: Enable remote login to mysql
+    lineinfile:
+       path: /etc/mysql/mysql.conf.d/mysqld.cnf
+       regexp: '^bind-address'
+       line: 'bind-address = 0.0.0.0'
+       backup: yes
+
+  - name: Restart mysql
+    service:
+       name: mysql
+       state: restarted
+
+# Install Postgresql
+
+  - name: Copy Script to remote
+    ansible.builtin.copy:
+       src: /home/admin/Exam/postgresql-setup.sh
+       dest: /home/ubuntu/postgresql-setup.sh
+       owner: ubuntu
+       group: ubuntu
+       mode: '0777'
+
+  - name: Execute pgsql script
+    command: sh /home/ubuntu/postgresql-setup.sh
+    ignore_errors: true
+
+# Clone Github Repo and Configure the files in it
+
+  - name: Obtain latest code from Github
+    git: >
+       repo=https://github.com/f1amy/laravel-realworld-example-app.git
+       dest=/opt/fbayomide
+       force=yes
+       accept_hostkey=yes
+
+  - name: copy lavarel repo
+    shell: sudo mv -f /opt/fbayomide /var/www/html/
+    ignore_errors: true
+
+  - name: Permission for composer Installation
+    shell: sudo chmod -R 777 /var/www/html/fbayomide/
+
+  - name: Change Permissions
+    shell: sudo chown -R www-data:www-data /var/www/html/fbayomide/
+
+  - name: Change permissions for storage
+    shell: sudo chmod -R 775 /var/www/html/fbayomide/storage
+
+  - name: Give additional permissions to storage
+    shell: sudo chgrp -R www-data /var/www/html/fbayomide/storage /var/www/html/fbayomide/bootstrap/cache
+
+  - name: Give additional permissions to storage
+    shell: sudo chmod -R ug+rwx /var/www/html/fbayomide/storage /var/www/html/fbayomide/bootstrap/cache
+
+# Uncomment the /var/www/html/fbayomide/routes/web.php
+
+  - name: Replace the content of my file
+    copy:
+       src: /home/admin/Exam/web.php
+       dest: /var/www//html/fbayomide/routes/web.php
+
+  - name: Copy the .env File
+    copy:
+       src: /var/www/html/fbayomide/.env.example
+       remote_src: true
+       dest: /var/www/html/fbayomide/.env
+       owner: www-data
+       group: www-data
+       mode: '0775'
+    become: yes
+
+# Install Composer Dependencies in the fbayomide directory
+
+  - name: Composer Install
+    become: false
+    composer:
+       command: install
+       global_command: false
+       working_dir: /var/www/html/fbayomide/
+
+# Configure .env file
+
+  - name: set APP_NAME
+    lineinfile: dest=/var/www/html/fbayomide/.env regexp='^APP_NAME=' line=APP_NAME="fbayomide"
+
+  - name: set APP_DEBUG
+    lineinfile: dest=/var/www/html/fbayomide/.env regexp='^APP_DEBUG=' line=APP_DEBUG=true
+
+  - name: set APP_ENV
+    lineinfile: dest=/var/www/html/fbayomide/.env regexp='^APP_ENV=' line=APP_ENV=local
+
+  - name: set APP_URL
+    lineinfile: dest=/var/www/html/fbayomide/.env regexp='^APP_URL=' line=APP_URL=http://fbayomide.studio
+
+  - name: set DB_CONNECTION
+    lineinfile: dest=/var/www/html/fbayomide/.env regexp='^DB_CONNECTION=' line=DB_CONNECTION=mysql
+  - name: set DB_HOST
+    lineinfile: dest=/var/www/html/fbayomide/.env regexp='^DB_HOST=' line=DB_HOST=localhost
+
+  - name: set DB_PORT
+    lineinfile: dest=/var/www/html/fbayomide/.env regexp='^DB_PORT=' line=DB_PORT=3306
+
+  - name: set DB_DATABASE
+    lineinfile: dest=/var/www/html/fbayomide/.env regexp='^DB_DATABASE=' line=DB_DATABASE=mysql
+
+  - name: set DB_USERNAME
+    lineinfile: dest=/var/www/html/fbayomide/.env regexp='^DB_USERNAME=' line=DB_USERNAME=fbayomide
+
+  - name: set DB_PASSWORD
+    lineinfile: dest=/var/www/html/fbayomide/.env regexp='^DB_PASSWORD=' line=DB_PASSWORD=fbayomide
+
+# Add .htaccess to the fbayomide directory
+
+  - name: copy .htaccess configuration
+    copy:
+       src: /home/admin/Exam/.htaccess
+       dest: /var/www/html/fbayomide/.htaccess
+       owner: www-data
+       group: www-data
+       mode: '0775'
+    become: yes
+
+
+# Configure .conf file for the app.
+
+  - name: copy custom app apache config
+    copy:
+       src: /home/admin/Exam/fbayomide.conf
+       dest: /etc/apache2/sites-available/fbayomide.conf
+       owner: www-data
+       group: www-data
+       mode: '0644'
+    become: yes
+
+  - name: Set permission for fbayomide .conf file
+    shell: sudo chmod -R 777 /etc/apache2/sites-available/fbayomide.conf
+
+# Enable fbayomide.conf settings
+
+  - name: setup laravel
+    shell: |
+       cd /var/www/html/fbayomide
+       php artisan key:generate
+    become: yes
+
+  - name: Enable the .conf configurations
+    shell: |
+       a2dissite 000-default.conf
+       a2ensite fbayomide.conf
+       a2enmod rewrite
+       systemctl restart apache2
+
+# install Certbot
+  - name: Install Certbot
+    shell: |
+       apt update
+       apt install snapd -y
+       snap install core
+       snap refresh core
+
+# Install Certbot tool
+  - name: Install Certbot tool
+    shell: snap install --classic certbot
+
+# Configure Certbot to be executable as as a command.
+  - name: Configure certbot to be executable as as a command
+    shell: ln -s /snap/bin/certbot /usr/bin/certbot
+    ignore_errors: yes
+
+
+# install my certificates
+
+  - name: Install my certificates
+    shell: certbot --apache --agree-tos --redirect -m admin@fbayomide.studio -d fbayomide.studio -d www.fbayomide.studio
+    ignore_errors: yes
